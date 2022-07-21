@@ -1,70 +1,179 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
-
+import 'package:movie_app/src/movies/now_playing_movie_list_model.dart';
 import '../settings/settings_view.dart';
-import 'movie_item.dart';
+import '../widgets/movie_card_widget.dart';
 import 'movie_item_details_view.dart';
+import 'package:http/http.dart' as http;
 
-/// Displays a list of SampleItems.
-class MovieListView extends StatelessWidget {
+class MovieListView extends StatefulWidget {
   const MovieListView({
     Key? key,
-    this.items = const [Movie(1), Movie(2), Movie(3)],
   }) : super(key: key);
 
   static const routeName = '/';
 
-  final List<Movie> items;
+  @override
+  State<MovieListView> createState() => _MovieListViewState();
+}
+
+class _MovieListViewState extends State<MovieListView> {
+  late bool _isLastPage;
+  late int _pageNumber;
+  late bool _error;
+  late bool _loading;
+  final int _numberOfPostsPerRequest = 10;
+  late List<Results> _movies;
+  late NowPlayingMovie nowPlayingMovie;
+  final int _nextPageTrigger = 3;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageNumber = 1;
+    _movies = [];
+    _isLastPage = false;
+    _loading = true;
+    _error = false;
+    fetchData();
+  }
+
+  Future<void> fetchData() async {
+    try {
+      final response = await http.get(Uri.parse(
+          "https://api.themoviedb.org/3/movie/now_playing?page=$_pageNumber&api_key=2b4e50df8fd06e2b35de23b97f3546a1"));
+
+      nowPlayingMovie = NowPlayingMovie.fromJson(jsonDecode(response.body));
+
+      setState(() {
+        _isLastPage =
+            nowPlayingMovie.results!.length < _numberOfPostsPerRequest;
+        _loading = false;
+        _pageNumber = _pageNumber + 1;
+        _movies.addAll(nowPlayingMovie.results!);
+      });
+    } catch (e) {
+      setState(() {
+        _loading = false;
+        _error = true;
+      });
+    }
+  }
+
+  Widget errorDialog({required double size}) {
+    return SizedBox(
+      height: 180,
+      width: 200,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            'An error occurred when fetching the movies.',
+            style: TextStyle(
+                fontSize: size,
+                fontWeight: FontWeight.w500,
+                color: Colors.black),
+          ),
+          const SizedBox(
+            height: 10,
+          ),
+          ElevatedButton(
+              onPressed: () {
+                setState(() {
+                  _loading = true;
+                  _error = false;
+                  fetchData();
+                });
+              },
+              child: const Text(
+                "Retry",
+                style: TextStyle(fontSize: 20, color: Colors.purpleAccent),
+              )),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Sample Items'),
+        title: const Text("Now Showing"),
+        centerTitle: true,
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () {
-              // Navigate to the settings page. If the user leaves and returns
-              // to the app after it has been killed while running in the
-              // background, the navigation stack is restored.
               Navigator.restorablePushNamed(context, SettingsView.routeName);
             },
           ),
         ],
       ),
-
-      // To work with lists that may contain a large number of items, it’s best
-      // to use the ListView.builder constructor.
-      //
-      // In contrast to the default ListView constructor, which requires
-      // building all Widgets up front, the ListView.builder constructor lazily
-      // builds Widgets as they’re scrolled into view.
-      body: ListView.builder(
-        // Providing a restorationId allows the ListView to restore the
-        // scroll position when a user leaves and returns to the app after it
-        // has been killed while running in the background.
-        restorationId: 'sampleItemListView',
-        itemCount: items.length,
-        itemBuilder: (BuildContext context, int index) {
-          final item = items[index];
-
-          return ListTile(
-              title: Text('SampleItem ${item.id}'),
-              leading: const CircleAvatar(
-                // Display the Flutter Logo image asset.
-                foregroundImage: AssetImage('assets/images/flutter_logo.png'),
-              ),
-              onTap: () {
-                // Navigate to the details page. If the user leaves and returns to
-                // the app after it has been killed while running in the
-                // background, the navigation stack is restored.
-                Navigator.restorablePushNamed(
-                  context,
-                  MovieDetailsView.routeName,
-                );
-              });
-        },
-      ),
+      body: buildPostsView(),
     );
+  }
+
+  Widget buildPostsView() {
+    if (_movies.isEmpty) {
+      if (_loading) {
+        return const Center(
+            child: Padding(
+          padding: EdgeInsets.all(8),
+          child: CircularProgressIndicator(),
+        ));
+      } else if (_error) {
+        return Center(child: errorDialog(size: 20));
+      }
+    }
+    return ListView.builder(
+        itemCount: _movies.length + (_isLastPage ? 0 : 1),
+        itemBuilder: (context, index) {
+          if (index == _movies.length - _nextPageTrigger) {
+            fetchData();
+          }
+          if (index == _movies.length) {
+            if (_error) {
+              return Center(child: errorDialog(size: 15));
+            } else {
+              return const Center(
+                  child: Padding(
+                padding: EdgeInsets.all(8),
+                child: CircularProgressIndicator(),
+              ));
+            }
+          }
+          final Results movie = _movies[index];
+          return Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: GestureDetector(
+              onTap: () {
+                Navigator.restorablePushNamed(
+                    context, MovieDetailsView.routeName,
+                    arguments: movie.id!);
+              },
+              child: movieCard(
+                  movieTitle: movie.title!,
+                  index: index,
+                  imagePath:
+                      'https://image.tmdb.org/t/p/original${movie.posterPath}'),
+            ),
+          );
+        });
+  }
+
+  Future<NowPlayingMovie> fetchMovie(int page) async {
+    var url = Uri.parse(
+        'https://api.themoviedb.org/3/movie/now_playing?api_key=2b4e50df8fd06e2b35de23b97f3546a1&page=${page}');
+    var response = await http.get(url);
+
+    if (response.statusCode == 200) {
+      // If the server did return a 200 OK response,
+      // then parse the JSON.
+      return NowPlayingMovie.fromJson(jsonDecode(response.body));
+    } else {
+      // If the server did not return a 200 OK response,
+      // then throw an exception.
+      throw Exception('Failed to load movie');
+    }
   }
 }

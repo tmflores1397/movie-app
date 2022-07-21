@@ -1,0 +1,4 @@
+http: ^0.13.4
+url_launcher: ^6.1.5
+
+http to call the tmdb api, url_launcher to enable launching browser for hyperlink.
